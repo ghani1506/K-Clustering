@@ -22,9 +22,7 @@ st.write(
     "The app will cluster students based on selected numeric variables."
 )
 
-# ---------------------------------------------------
-# Detect numeric columns
-# ---------------------------------------------------
+
 def detect_numeric_columns(df):
     numeric_cols = []
 
@@ -37,15 +35,8 @@ def detect_numeric_columns(df):
     return numeric_cols
 
 
-# ---------------------------------------------------
-# Prepare data
-# ---------------------------------------------------
 def prepare_data(df, selected_cols):
-
-    X = df[selected_cols].apply(
-        pd.to_numeric,
-        errors="coerce"
-    )
+    X = df[selected_cols].apply(pd.to_numeric, errors="coerce")
 
     for col in X.columns:
         X[col] = X[col].fillna(X[col].median())
@@ -53,13 +44,8 @@ def prepare_data(df, selected_cols):
     return X
 
 
-# ---------------------------------------------------
-# PCA Cluster Plot
-# ---------------------------------------------------
 def plot_clusters(X_scaled, labels):
-
     pca = PCA(n_components=2)
-
     components = pca.fit_transform(X_scaled)
 
     fig, ax = plt.subplots(figsize=(9, 6))
@@ -75,12 +61,9 @@ def plot_clusters(X_scaled, labels):
 
     ax.set_xlabel("Principal Component 1")
     ax.set_ylabel("Principal Component 2")
-
-    ax.set_title("Student Clusters (PCA Visualization)")
-
+    ax.set_title("Student Clusters Using PCA")
     ax.grid(alpha=0.3)
 
-    # Legend
     legend = ax.legend(
         *scatter.legend_elements(),
         title="Cluster"
@@ -91,23 +74,17 @@ def plot_clusters(X_scaled, labels):
     return fig
 
 
-# ---------------------------------------------------
-# Upload CSV
-# ---------------------------------------------------
 uploaded_file = st.file_uploader(
     "Upload CSV File",
     type=["csv"]
 )
 
-# ---------------------------------------------------
-# Main App
-# ---------------------------------------------------
+
 if uploaded_file:
 
     df = pd.read_csv(uploaded_file)
 
     st.subheader("Uploaded Data")
-
     st.dataframe(df.head())
 
     numeric_cols = detect_numeric_columns(df)
@@ -116,7 +93,6 @@ if uploaded_file:
         st.error("No numeric columns detected.")
         st.stop()
 
-    # Remove label columns if present
     default_cols = [
         col for col in numeric_cols
         if col.lower() not in ["cluster", "true_group"]
@@ -135,24 +111,17 @@ if uploaded_file:
         value=3
     )
 
-    # ---------------------------------------------------
-    # Run Clustering
-    # ---------------------------------------------------
     if st.button("Run K-Means Clustering"):
 
         if len(selected_cols) == 0:
             st.warning("Please select at least one variable.")
             st.stop()
 
-        # Prepare Data
         X = prepare_data(df, selected_cols)
 
-        # Standardize
         scaler = StandardScaler()
-
         X_scaled = scaler.fit_transform(X)
 
-        # KMeans Model
         model = KMeans(
             n_clusters=k,
             random_state=42,
@@ -161,17 +130,59 @@ if uploaded_file:
 
         labels = model.fit_predict(X_scaled)
 
-        # Add cluster labels
         df["cluster"] = labels
+
+        # ---------------------------------------------------
+        # Cluster Profiles
+        # ---------------------------------------------------
+        cluster_summary = (
+            df.groupby("cluster")[selected_cols]
+            .mean()
+            .round(2)
+        )
+
+        cluster_summary["Overall_Mean"] = (
+            cluster_summary[selected_cols]
+            .mean(axis=1)
+            .round(2)
+        )
+
+        cluster_summary = cluster_summary.sort_values(
+            by="Overall_Mean"
+        )
+
+        ordered_clusters = cluster_summary.index.tolist()
+
+        performance_labels = {}
+
+        if len(ordered_clusters) == 2:
+            performance_labels[ordered_clusters[0]] = "Low Performers"
+            performance_labels[ordered_clusters[1]] = "High Performers"
+
+        elif len(ordered_clusters) == 3:
+            performance_labels[ordered_clusters[0]] = "Low Performers"
+            performance_labels[ordered_clusters[1]] = "Average Performers"
+            performance_labels[ordered_clusters[2]] = "High Performers"
+
+        else:
+            performance_labels[ordered_clusters[0]] = "Lowest Performers"
+            performance_labels[ordered_clusters[-1]] = "Highest Performers"
+
+            for middle_cluster in ordered_clusters[1:-1]:
+                performance_labels[middle_cluster] = "Middle Performers"
+
+        cluster_summary["Performance_Level"] = (
+            cluster_summary.index.map(performance_labels)
+        )
+
+        df["Performance_Level"] = df["cluster"].map(performance_labels)
 
         # ---------------------------------------------------
         # Results
         # ---------------------------------------------------
         st.subheader("Clustered Student Data")
-
         st.dataframe(df)
 
-        # Silhouette Score
         sil = silhouette_score(X_scaled, labels)
 
         st.metric(
@@ -179,39 +190,26 @@ if uploaded_file:
             value=round(sil, 3)
         )
 
-        # ---------------------------------------------------
-        # Cluster Profiles
-        # ---------------------------------------------------
-        st.subheader("Cluster Profiles")
-
-        cluster_summary = (
-            df.groupby("cluster")[selected_cols]
-            .mean()
-            .round(2)
-        )
-
+        st.subheader("Cluster Profiles: Lowest to Highest Performers")
         st.dataframe(cluster_summary)
 
         st.write(
             """
-            Interpretation Guide:
-            - Higher averages → Higher performing cluster
-            - Lower averages → Lower performing cluster
+            **How to read this:**
+
+            The app calculates the average score for each cluster.
+
+            The cluster with the **lowest Overall_Mean** is labelled as the weakest group.
+
+            The cluster with the **highest Overall_Mean** is labelled as the strongest group.
             """
         )
 
-        # ---------------------------------------------------
-        # PCA Plot
-        # ---------------------------------------------------
         st.subheader("Cluster Visualization")
 
         fig = plot_clusters(X_scaled, labels)
-
         st.pyplot(fig)
 
-        # ---------------------------------------------------
-        # Download Results
-        # ---------------------------------------------------
         csv = df.to_csv(index=False).encode("utf-8")
 
         st.download_button(
